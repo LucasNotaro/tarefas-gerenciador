@@ -1,0 +1,36 @@
+@baseUrl =  http://localhost:3000
+
+### Get
+GET {{baseUrl}}
+
+### GET by ID
+GET {{baseUrl}}/68b8d209cc1b2d00f3315b07
+
+### Post
+POST {{baseUrl}}/inseir
+Content-Type: application/json
+
+{
+    "name": "SoPHIA "
+}
+
+### Delete
+DELETE {{baseUrl}}/deletar
+Content-Type: application/json
+
+{
+    "name": "SoPHIA "
+
+}
+
+### DELETE by ID
+DELETE {{baseUrl}}/deletar/68b8cb5ad786955c6087eeac
+
+
+### PUT by ID
+PUT {{baseUrl}}/alterar/68b8d209cc1b2d00f3315b07
+Content-Type: application/json  
+
+{
+    "name": "Gustavo Silva"
+}

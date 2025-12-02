@@ -266,6 +266,10 @@ app.post('/users', async (req, res) => {
     if (!nome?.trim() || !telefone?.trim()) {
       return res.status(400).json({ erro: 'Informe nome e telefone do usuário.' });
     }
+    const telefoneLimpo = telefone.replace(/\D/g, '');
+    if (telefoneLimpo.length < 8) {
+      return res.status(400).json({ erro: 'Telefone inválido.' });
+    }
 
     const { rows } = await pool.query(
       `INSERT INTO users (nome, telefone)

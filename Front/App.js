@@ -29,6 +29,16 @@ const detectarColunaCriador = async (database) => {
   return sqliteHasCriadorColumn;
 };
 
+const formatarTelefone = (valor) => {
+  const digits = valor.replace(/\D/g, '').slice(0, 11);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+};
+
 const ensureSQLiteSchema = async (database) => {
   await database.execAsync('PRAGMA foreign_keys = ON;');
   await database.execAsync(`
@@ -488,7 +498,15 @@ function Detalhe({ tarefa, onVoltar, onConcluir, styles }) {
 function Usuarios({ usuarios, novoUsuario, setNovoUsuario, onSalvar, onVoltar, styles }) {
   return (
     <View style={styles.container}>
-      <Text style={[styles.title, styles.screenTitle]}>Usuários</Text>
+      <View style={[styles.header, styles.usersHeader]}>
+        <View>
+          <Text style={styles.title}>Usuários</Text>
+          <Text style={styles.subtitle}>Gerencie responsáveis das tarefas</Text>
+        </View>
+        <TouchableOpacity style={styles.switchBtn} onPress={onVoltar}>
+          <Text style={styles.switchBtnText}>Voltar</Text>
+        </TouchableOpacity>
+      </View>
       <View style={styles.form}>
         <Text style={styles.subtitle}>Cadastrar usuário</Text>
         <TextInput
@@ -501,7 +519,10 @@ function Usuarios({ usuarios, novoUsuario, setNovoUsuario, onSalvar, onVoltar, s
           placeholder="Telefone"
           style={styles.input}
           value={novoUsuario.telefone}
-          onChangeText={(v) => setNovoUsuario((prev) => ({ ...prev, telefone: v }))}
+          keyboardType="phone-pad"
+          onChangeText={(v) =>
+            setNovoUsuario((prev) => ({ ...prev, telefone: formatarTelefone(v) }))
+          }
         />
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
           <Button title="Salvar usuário" onPress={onSalvar} />
@@ -726,6 +747,10 @@ export default function App() {
     if (!novoUsuario.nome.trim() || !novoUsuario.telefone.trim()) {
       return Alert.alert('Atenção', 'Informe nome e telefone.');
     }
+    const telefoneLimpo = novoUsuario.telefone.replace(/\D/g, '');
+    if (telefoneLimpo.length < 8) {
+      return Alert.alert('Atenção', 'Informe um telefone válido (mínimo 8 dígitos).');
+    }
     const payload = {
       nome: novoUsuario.nome.trim(),
       telefone: novoUsuario.telefone.trim(),
@@ -898,6 +923,7 @@ const styles = StyleSheet.create({
   },
   selectorButtonText: { color: '#fff', fontSize: 16, fontWeight: '500' },
   screenTitle: { paddingHorizontal: 16, paddingTop: 12 },
+  usersHeader: { paddingBottom: 0 },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.3)',

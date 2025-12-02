@@ -40,27 +40,69 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-const mapRow = (row) => ({
+const mapTaskRow = (row) => ({
   id: row.id,
   titulo: row.titulo,
   descricao: row.descricao,
   status: row.status,
-  criadorNome: row.criador_nome,
-  criadorEmail: row.criador_email,
+  usuarioId: row.usuario_id,
+  usuarioNome: row.usuario_nome,
+  usuarioTelefone: row.usuario_telefone,
+  criadoEm: row.criado_em,
+});
+
+const mapUserRow = (row) => ({
+  id: row.id,
+  nome: row.nome,
+  telefone: row.telefone,
   criadoEm: row.criado_em,
 });
 
 async function ensureTables() {
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      nome TEXT NOT NULL,
+      telefone TEXT NOT NULL,
+      criado_em TIMESTAMPTZ DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS tasks (
       id SERIAL PRIMARY KEY,
       titulo TEXT NOT NULL,
       descricao TEXT,
-      status VARCHAR(30) DEFAULT 'aberta',
-      criador_nome TEXT NOT NULL,
-      criador_email TEXT,
+      status VARCHAR(30) DEFAULT 'pendente',
+      usuario_id INTEGER REFERENCES users(id),
       criado_em TIMESTAMPTZ DEFAULT NOW()
     );
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'tasks' AND column_name = 'usuario_id'
+      ) THEN
+        ALTER TABLE tasks ADD COLUMN usuario_id INTEGER REFERENCES users(id);
+      END IF;
+    END
+    $$;
+  `);
+
+  await pool.query(`ALTER TABLE tasks ALTER COLUMN status SET DEFAULT 'pendente';`);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'tasks' AND column_name = 'criador_nome'
+      ) THEN
+        ALTER TABLE tasks ALTER COLUMN criador_nome DROP NOT NULL;
+      END IF;
+    END
+    $$;
   `);
 }
 
@@ -78,9 +120,12 @@ app.get('/health', (_, res) => {
 app.get('/tasks', async (_, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT * FROM tasks ORDER BY criado_em DESC, id DESC'
+      `SELECT t.*, u.nome AS usuario_nome, u.telefone AS usuario_telefone
+       FROM tasks t
+       LEFT JOIN users u ON u.id = t.usuario_id
+       ORDER BY t.criado_em DESC, t.id DESC`
     );
-    res.json(rows.map(mapRow));
+    res.json(rows.map(mapTaskRow));
   } catch (error) {
     res.status(500).json({ erro: 'Não foi possível listar as tarefas.', detalhe: error.message });
   }
@@ -88,11 +133,16 @@ app.get('/tasks', async (_, res) => {
 
 app.get('/tasks/:id', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM tasks WHERE id = $1 LIMIT 1', [
-      req.params.id,
-    ]);
+    const { rows } = await pool.query(
+      `SELECT t.*, u.nome AS usuario_nome, u.telefone AS usuario_telefone
+       FROM tasks t
+       LEFT JOIN users u ON u.id = t.usuario_id
+       WHERE t.id = $1
+       LIMIT 1`,
+      [req.params.id]
+    );
     if (!rows.length) return res.status(404).json({ erro: 'Tarefa não encontrada.' });
-    res.json(mapRow(rows[0]));
+    res.json(mapTaskRow(rows[0]));
   } catch (error) {
     res.status(400).json({ erro: 'ID inválido ou inexistente.', detalhe: error.message });
   }
@@ -100,19 +150,30 @@ app.get('/tasks/:id', async (req, res) => {
 
 app.post('/tasks', async (req, res) => {
   try {
-    const { titulo, descricao = '', status = 'aberta', criadorNome, criadorEmail = '' } =
-      req.body || {};
-    if (!titulo?.trim() || !criadorNome?.trim()) {
-      return res.status(400).json({ erro: 'Informe título e o nome de quem criou a tarefa.' });
+    const { titulo, descricao = '', usuarioId } = req.body || {};
+    if (!titulo?.trim() || !usuarioId) {
+      return res.status(400).json({ erro: 'Informe título e atribua a tarefa a um usuário.' });
+    }
+
+    const usuario = await pool.query('SELECT id FROM users WHERE id = $1', [usuarioId]);
+    if (!usuario.rowCount) {
+      return res.status(400).json({ erro: 'Usuário informado não existe.' });
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO tasks (titulo, descricao, status, criador_nome, criador_email)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO tasks (titulo, descricao, status, usuario_id)
+       VALUES ($1, $2, 'pendente', $3)
        RETURNING *`,
-      [titulo.trim(), descricao, status.trim() || 'aberta', criadorNome.trim(), criadorEmail.trim()]
+      [titulo.trim(), descricao, usuarioId]
     );
-    res.status(201).json(mapRow(rows[0]));
+    const tarefaCriada = await pool.query(
+      `SELECT t.*, u.nome AS usuario_nome, u.telefone AS usuario_telefone
+       FROM tasks t
+       LEFT JOIN users u ON u.id = t.usuario_id
+       WHERE t.id = $1`,
+      [rows[0].id]
+    );
+    res.status(201).json(mapTaskRow(tarefaCriada.rows[0]));
   } catch (error) {
     res.status(400).json({ erro: 'Falha ao criar tarefa.', detalhe: error.message });
   }
@@ -120,11 +181,33 @@ app.post('/tasks', async (req, res) => {
 
 app.put('/tasks/:id', async (req, res) => {
   try {
-    const { titulo, descricao = '', status = 'aberta', criadorNome, criadorEmail = '' } =
-      req.body || {};
+    const { titulo, descricao = '', status, usuarioId } = req.body || {};
 
-    if (!titulo?.trim() || !criadorNome?.trim()) {
-      return res.status(400).json({ erro: 'Informe título e o nome de quem criou a tarefa.' });
+    if (!titulo?.trim()) {
+      return res.status(400).json({ erro: 'Informe o título da tarefa.' });
+    }
+
+    const tarefaExistente = await pool.query(
+      'SELECT id, usuario_id, status FROM tasks WHERE id = $1',
+      [req.params.id]
+    );
+    if (!tarefaExistente.rowCount) {
+      return res.status(404).json({ erro: 'Tarefa não encontrada.' });
+    }
+
+    const usuarioDestino = usuarioId ?? tarefaExistente.rows[0].usuario_id;
+    if (!usuarioDestino) {
+      return res.status(400).json({ erro: 'A tarefa precisa estar atribuída a um usuário.' });
+    }
+
+    const usuario = await pool.query('SELECT id FROM users WHERE id = $1', [usuarioDestino]);
+    if (!usuario.rowCount) {
+      return res.status(400).json({ erro: 'Usuário informado não existe.' });
+    }
+
+    const statusLimpo = status?.trim().toLowerCase();
+    if (statusLimpo && !['pendente', 'concluida'].includes(statusLimpo)) {
+      return res.status(400).json({ erro: 'Status inválido.' });
     }
 
     const { rows } = await pool.query(
@@ -132,22 +215,27 @@ app.put('/tasks/:id', async (req, res) => {
        SET titulo = $1,
            descricao = $2,
            status = $3,
-           criador_nome = $4,
-           criador_email = $5
-       WHERE id = $6
+           usuario_id = $4
+       WHERE id = $5
        RETURNING *`,
       [
         titulo.trim(),
         descricao,
-        status.trim() || 'aberta',
-        criadorNome.trim(),
-        criadorEmail.trim(),
+        statusLimpo || tarefaExistente.rows[0].status,
+        usuarioDestino,
         req.params.id,
       ]
     );
 
     if (!rows.length) return res.status(404).json({ erro: 'Tarefa não encontrada.' });
-    res.json(mapRow(rows[0]));
+    const tarefaAtualizada = await pool.query(
+      `SELECT t.*, u.nome AS usuario_nome, u.telefone AS usuario_telefone
+       FROM tasks t
+       LEFT JOIN users u ON u.id = t.usuario_id
+       WHERE t.id = $1`,
+      [rows[0].id]
+    );
+    res.json(mapTaskRow(tarefaAtualizada.rows[0]));
   } catch (error) {
     res.status(400).json({ erro: 'Falha ao atualizar tarefa.', detalhe: error.message });
   }
@@ -160,6 +248,34 @@ app.delete('/tasks/:id', async (req, res) => {
     res.json({ status: 'removida' });
   } catch (error) {
     res.status(400).json({ erro: 'Falha ao excluir tarefa.', detalhe: error.message });
+  }
+});
+
+app.get('/users', async (_, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM users ORDER BY nome ASC');
+    res.json(rows.map(mapUserRow));
+  } catch (error) {
+    res.status(500).json({ erro: 'Não foi possível listar os usuários.', detalhe: error.message });
+  }
+});
+
+app.post('/users', async (req, res) => {
+  try {
+    const { nome, telefone } = req.body || {};
+    if (!nome?.trim() || !telefone?.trim()) {
+      return res.status(400).json({ erro: 'Informe nome e telefone do usuário.' });
+    }
+
+    const { rows } = await pool.query(
+      `INSERT INTO users (nome, telefone)
+       VALUES ($1, $2)
+       RETURNING *`,
+      [nome.trim(), telefone.trim()]
+    );
+    res.status(201).json(mapUserRow(rows[0]));
+  } catch (error) {
+    res.status(400).json({ erro: 'Falha ao criar usuário.', detalhe: error.message });
   }
 });
 

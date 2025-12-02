@@ -7,12 +7,15 @@ import {
   FlatList,
   Image,
   Modal,
+  Platform,
+  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { StatusBar as RNStatusBar } from 'react-native';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://192.168.0.194:3000';
 
@@ -485,7 +488,7 @@ function Detalhe({ tarefa, onVoltar, onConcluir, styles }) {
 function Usuarios({ usuarios, novoUsuario, setNovoUsuario, onSalvar, onVoltar, styles }) {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Usuários</Text>
+      <Text style={[styles.title, styles.screenTitle]}>Usuários</Text>
       <View style={styles.form}>
         <Text style={styles.subtitle}>Cadastrar usuário</Text>
         <TextInput
@@ -506,7 +509,9 @@ function Usuarios({ usuarios, novoUsuario, setNovoUsuario, onSalvar, onVoltar, s
         </View>
       </View>
 
-      <Text style={[styles.title, { fontSize: 18, marginHorizontal: 16 }]}>Cadastrados</Text>
+      <Text style={[styles.title, { fontSize: 18, marginHorizontal: 16, marginTop: 16 }]}>
+        Cadastrados
+      </Text>
       <FlatList
         data={usuarios}
         keyExtractor={(item) => String(item.id)}
@@ -761,7 +766,8 @@ export default function App() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={{ flex: 1 }}>
       {tela === 'lista' && (
         <Lista
           tarefas={tarefas}
@@ -807,13 +813,19 @@ export default function App() {
           styles={styles}
         />
       )}
-    </View>
+      </View>
+    </SafeAreaView>
   );
 }
 
 /* ===================== STYLES ===================== */
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#fff',
+    paddingTop: Platform.OS === 'android' ? (RNStatusBar.currentHeight || 24) : 0,
+  },
   container: { flex: 1, backgroundColor: '#fff' },
   header: {
     paddingHorizontal: 16,
@@ -885,6 +897,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   selectorButtonText: { color: '#fff', fontSize: 16, fontWeight: '500' },
+  screenTitle: { paddingHorizontal: 16, paddingTop: 12 },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.3)',

@@ -321,6 +321,23 @@ app.post('/users', async (req, res) => {
   }
 });
 
+app.delete('/users/:id', async (req, res) => {
+  try {
+    const usuarioId = Number(req.params.id);
+    if (!Number.isInteger(usuarioId) || usuarioId <= 0) {
+      return res.status(400).json({ erro: 'ID inválido.' });
+    }
+
+    await pool.query('UPDATE tasks SET usuario_id = NULL WHERE usuario_id = $1', [usuarioId]);
+    const { rowCount } = await pool.query('DELETE FROM users WHERE id = $1', [usuarioId]);
+    if (!rowCount) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+
+    res.json({ status: 'removido' });
+  } catch (error) {
+    res.status(400).json({ erro: 'Falha ao excluir usuário.', detalhe: error.message });
+  }
+});
+
 app.listen(port, () => {
   console.log(`API rodando em http://localhost:${port}`);
 });

@@ -42,6 +42,13 @@ const formatarTelefone = (valor) => {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
 };
 
+const corStatus = (status) => {
+  const valor = (status ?? '').toLowerCase();
+  if (valor === 'concluida') return '#1b5e20';
+  if (valor === 'pendente') return '#b71c1c';
+  return '#555';
+};
+
 const ensureSQLiteSchema = async (database) => {
   await database.execAsync('PRAGMA foreign_keys = ON;');
   await database.execAsync(`
@@ -249,19 +256,45 @@ const inserirUsuarioSQLite = async ({ nome, telefone }) => {
   }
 };
 
+const excluirUsuarioSQLite = async (id) => {
+  try {
+    const database = await getDatabase();
+    await database.runAsync('UPDATE tasks SET usuario_id = NULL WHERE usuario_id = ?', [id]);
+    await database.runAsync('DELETE FROM users WHERE id = ?', [id]);
+  } catch (error) {
+    console.error('Erro ao excluir usuário:', error);
+    throw error;
+  }
+};
+
 const fetchJson = async (url, options = {}) => {
   const resp = await fetch(url, options);
-  if (!resp.ok) {
-    let message = '';
+  const parseJsonSafe = async (response) => {
     try {
-      const body = await resp.json();
+      return await response.json();
+    } catch {
+      return null;
+    }
+  };
+
+  if (!resp.ok) {
+    const clone = resp.clone();
+    let message = '';
+    const body = await parseJsonSafe(clone);
+    if (body) {
       message = body?.erro || body?.message || '';
-    } catch (err) {
-      message = await resp.text();
+    }
+    if (!message) {
+      try {
+        message = await clone.text();
+      } catch {
+        message = '';
+      }
     }
     throw new Error(message || 'Erro na API');
   }
-  return resp.json();
+
+  return parseJsonSafe(resp);
 };
 
 const listarPostgres = () => fetchJson(`${API_URL}/tasks`);
@@ -288,6 +321,10 @@ const inserirUsuarioPostgres = (payload) =>
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=UTF-8' },
     body: JSON.stringify(payload),
+  });
+const excluirUsuarioPostgres = (id) =>
+  fetchJson(`${API_URL}/users/${id}`, {
+    method: 'DELETE',
   });
 
 /* ===================== COMPONENTES ===================== */
@@ -355,7 +392,12 @@ function Lista({
         renderItem={({ item }) => (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{item.titulo}</Text>
-            <Text style={styles.cardSub}>Status: {item.status}</Text>
+            <Text style={styles.cardSub}>
+              Status:{' '}
+              <Text style={{ color: corStatus(item.status), fontWeight: '700' }}>
+                {item.status}
+              </Text>
+            </Text>
             <Text style={styles.cardSub}>Responsável: {item.usuarioNome || '-'}</Text>
             <Text style={styles.cardSub}>Telefone: {item.usuarioTelefone || '-'}</Text>
             <View style={styles.actions}>
@@ -484,7 +526,10 @@ function Detalhe({ tarefa, onVoltar, onConcluir, styles }) {
           <Text style={styles.bold}>Descrição:</Text> {tarefa.descricao || '-'}
         </Text>
         <Text style={styles.detail}>
-          <Text style={styles.bold}>Status:</Text> {tarefa.status}
+          <Text style={styles.bold}>Status:</Text>{' '}
+          <Text style={{ color: corStatus(tarefa.status), fontWeight: '700' }}>
+            {tarefa.status}
+          </Text>
         </Text>
         <Text style={styles.detail}>
           <Text style={styles.bold}>Responsável:</Text> {tarefa.usuarioNome || '-'}
@@ -506,7 +551,15 @@ function Detalhe({ tarefa, onVoltar, onConcluir, styles }) {
   );
 }
 
-function Usuarios({ usuarios, novoUsuario, setNovoUsuario, onSalvar, onVoltar, styles }) {
+function Usuarios({
+  usuarios,
+  novoUsuario,
+  setNovoUsuario,
+  onSalvar,
+  onExcluir,
+  onVoltar,
+  styles,
+}) {
   return (
     <View style={styles.container}>
       <View style={[styles.header, styles.usersHeader]}>
@@ -552,6 +605,14 @@ function Usuarios({ usuarios, novoUsuario, setNovoUsuario, onSalvar, onVoltar, s
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{item.nome}</Text>
             <Text style={styles.cardSub}>{item.telefone}</Text>
+            <View style={{ flexDirection: 'row', marginTop: 8 }}>
+              <TouchableOpacity
+                style={[styles.btn, styles.btnDanger, { alignSelf: 'flex-start' }]}
+                onPress={() => onExcluir(item)}
+              >
+                <Text style={styles.btnText}>Excluir</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
         ListEmptyComponent={
@@ -770,6 +831,37 @@ export default function App() {
     }
   };
 
+  const confirmarExcluirUsuario = (usuario) => {
+    Alert.alert(
+      'Excluir usuário',
+      `Deseja excluir ${usuario.nome}? As tarefas ficarão sem responsável.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: () => excluirUsuario(usuario.id),
+        },
+      ]
+    );
+  };
+
+  const excluirUsuario = async (id) => {
+    if (!fonteDados) return;
+    try {
+      if (fonteDados === 'sqlite') {
+        await excluirUsuarioSQLite(id);
+      } else {
+        await excluirUsuarioPostgres(id);
+      }
+      await carregarUsuarios();
+      await carregarTarefas();
+    } catch (error) {
+      console.error('Erro ao excluir usuário:', error);
+      Alert.alert('Erro', 'Não foi possível excluir o usuário.');
+    }
+  };
+
   const salvarUsuario = async () => {
     if (!fonteDados) return;
     const nomeLimpo = novoUsuario.nome.trim();
@@ -870,6 +962,7 @@ export default function App() {
           novoUsuario={novoUsuario}
           setNovoUsuario={setNovoUsuario}
           onSalvar={salvarUsuario}
+          onExcluir={confirmarExcluirUsuario}
           onVoltar={() => setTela('lista')}
           styles={styles}
         />

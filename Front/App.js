@@ -18,6 +18,9 @@ import {
 import { StatusBar as RNStatusBar } from 'react-native';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://192.168.0.194:3000';
+const MIN_NOME = 3;
+const MIN_TITULO = 3;
+const MIN_DESCRICAO = 5;
 
 let db = null;
 let sqliteHasCriadorColumn = null;
@@ -152,6 +155,8 @@ const obterSQLite = async (id) => {
 const inserirSQLite = async ({ titulo, descricao, usuarioId }) => {
   try {
     const database = await getDatabase();
+    const tituloLimpo = (titulo ?? '').trim();
+    const descricaoLimpa = (descricao ?? '').trim();
     const temCriador = await detectarColunaCriador(database);
     const usuario = await database.getFirstAsync('SELECT id FROM users WHERE id = ?', [usuarioId]);
     if (!usuario) {
@@ -160,8 +165,8 @@ const inserirSQLite = async ({ titulo, descricao, usuarioId }) => {
     const colunasExtras = temCriador ? ', criador_nome, criador_email' : '';
     const valoresExtras = temCriador ? ', ?, ?' : '';
     const params = temCriador
-      ? [titulo, descricao, usuarioId, '', '']
-      : [titulo, descricao, usuarioId];
+      ? [tituloLimpo, descricaoLimpa, usuarioId, '', '']
+      : [tituloLimpo, descricaoLimpa, usuarioId];
 
     const result = await database.runAsync(
       `INSERT INTO tasks (titulo, descricao, status, usuario_id, criado_em${colunasExtras})
@@ -201,7 +206,13 @@ const atualizarSQLite = async (id, { titulo, descricao, status, usuarioId }) => 
       `UPDATE tasks
        SET titulo = ?, descricao = ?, status = ?, usuario_id = ?
        WHERE id = ?`,
-      [titulo, descricao, statusParaSalvar, usuarioDestino, id]
+      [
+        (titulo ?? '').trim(),
+        (descricao ?? '').trim(),
+        statusParaSalvar,
+        usuarioDestino,
+        id,
+      ]
     );
     return obterSQLite(id);
   } catch (error) {
@@ -666,16 +677,33 @@ export default function App() {
 
   const salvar = async () => {
     if (!fonteDados) return;
-    if (!form.titulo.trim()) {
+    const tituloLimpo = form.titulo.trim();
+    const descricaoLimpa = form.descricao.trim();
+    if (!tituloLimpo) {
       return Alert.alert('Atenção', 'Informe o título da tarefa.');
+    }
+    if (tituloLimpo.length < MIN_TITULO) {
+      return Alert.alert(
+        'Atenção',
+        `O título deve ter pelo menos ${MIN_TITULO} caracteres.`
+      );
+    }
+    if (!descricaoLimpa) {
+      return Alert.alert('Atenção', 'Informe a descrição da tarefa.');
+    }
+    if (descricaoLimpa.length < MIN_DESCRICAO) {
+      return Alert.alert(
+        'Atenção',
+        `A descrição deve ter pelo menos ${MIN_DESCRICAO} caracteres.`
+      );
     }
     if (!form.usuarioId) {
       return Alert.alert('Atenção', 'Selecione um usuário para atribuir a tarefa.');
     }
 
     const payload = {
-      titulo: form.titulo.trim(),
-      descricao: form.descricao.trim(),
+      titulo: tituloLimpo,
+      descricao: descricaoLimpa,
       status: form.status || 'pendente',
       usuarioId: form.usuarioId,
     };
@@ -699,7 +727,7 @@ export default function App() {
       limparForm();
     } catch (error) {
       console.error('Erro ao salvar tarefa:', error);
-      Alert.alert('Erro', 'Não foi possível salvar a tarefa.');
+      Alert.alert('Erro', error.message || 'Não foi possível salvar a tarefa.');
     }
   };
 
@@ -744,16 +772,24 @@ export default function App() {
 
   const salvarUsuario = async () => {
     if (!fonteDados) return;
-    if (!novoUsuario.nome.trim() || !novoUsuario.telefone.trim()) {
+    const nomeLimpo = novoUsuario.nome.trim();
+    const telefoneLimpo = novoUsuario.telefone.trim();
+    if (!nomeLimpo || !telefoneLimpo) {
       return Alert.alert('Atenção', 'Informe nome e telefone.');
     }
-    const telefoneLimpo = novoUsuario.telefone.replace(/\D/g, '');
-    if (telefoneLimpo.length < 8) {
+    if (nomeLimpo.length < MIN_NOME) {
+      return Alert.alert(
+        'Atenção',
+        `O nome deve ter pelo menos ${MIN_NOME} caracteres.`
+      );
+    }
+    const telefoneSomenteNumeros = telefoneLimpo.replace(/\D/g, '');
+    if (telefoneSomenteNumeros.length < 8) {
       return Alert.alert('Atenção', 'Informe um telefone válido (mínimo 8 dígitos).');
     }
     const payload = {
-      nome: novoUsuario.nome.trim(),
-      telefone: novoUsuario.telefone.trim(),
+      nome: nomeLimpo,
+      telefone: telefoneLimpo,
     };
     try {
       if (fonteDados === 'sqlite') {
@@ -765,7 +801,7 @@ export default function App() {
       await carregarUsuarios();
     } catch (error) {
       console.error('Erro ao salvar usuário:', error);
-      Alert.alert('Erro', 'Não foi possível salvar o usuário.');
+      Alert.alert('Erro', error.message || 'Não foi possível salvar o usuário.');
     }
   };
 

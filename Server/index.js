@@ -8,6 +8,9 @@ const { Pool } = require('pg');
 
 const app = express();
 const port = process.env.PORT || 3000;
+const MIN_TITULO = 3;
+const MIN_DESCRICAO = 5;
+const MIN_NOME = 3;
 
 app.use(cors());
 app.use(methodOverride('X-HTTP-Method'));
@@ -151,8 +154,21 @@ app.get('/tasks/:id', async (req, res) => {
 app.post('/tasks', async (req, res) => {
   try {
     const { titulo, descricao = '', usuarioId } = req.body || {};
-    if (!titulo?.trim() || !usuarioId) {
+    const tituloLimpo = titulo?.trim() ?? '';
+    const descricaoLimpa = descricao?.trim() ?? '';
+
+    if (!tituloLimpo || !usuarioId) {
       return res.status(400).json({ erro: 'Informe título e atribua a tarefa a um usuário.' });
+    }
+    if (tituloLimpo.length < MIN_TITULO) {
+      return res
+        .status(400)
+        .json({ erro: `O título deve ter pelo menos ${MIN_TITULO} caracteres.` });
+    }
+    if (descricaoLimpa.length < MIN_DESCRICAO) {
+      return res
+        .status(400)
+        .json({ erro: `A descrição deve ter pelo menos ${MIN_DESCRICAO} caracteres.` });
     }
 
     const usuario = await pool.query('SELECT id FROM users WHERE id = $1', [usuarioId]);
@@ -164,7 +180,7 @@ app.post('/tasks', async (req, res) => {
       `INSERT INTO tasks (titulo, descricao, status, usuario_id)
        VALUES ($1, $2, 'pendente', $3)
        RETURNING *`,
-      [titulo.trim(), descricao, usuarioId]
+      [tituloLimpo, descricaoLimpa, usuarioId]
     );
     const tarefaCriada = await pool.query(
       `SELECT t.*, u.nome AS usuario_nome, u.telefone AS usuario_telefone
@@ -181,14 +197,20 @@ app.post('/tasks', async (req, res) => {
 
 app.put('/tasks/:id', async (req, res) => {
   try {
-    const { titulo, descricao = '', status, usuarioId } = req.body || {};
+    const { titulo, descricao, status, usuarioId } = req.body || {};
+    const tituloLimpo = titulo?.trim() ?? '';
 
-    if (!titulo?.trim()) {
+    if (!tituloLimpo) {
       return res.status(400).json({ erro: 'Informe o título da tarefa.' });
+    }
+    if (tituloLimpo.length < MIN_TITULO) {
+      return res
+        .status(400)
+        .json({ erro: `O título deve ter pelo menos ${MIN_TITULO} caracteres.` });
     }
 
     const tarefaExistente = await pool.query(
-      'SELECT id, usuario_id, status FROM tasks WHERE id = $1',
+      'SELECT id, usuario_id, status, descricao FROM tasks WHERE id = $1',
       [req.params.id]
     );
     if (!tarefaExistente.rowCount) {
@@ -210,6 +232,15 @@ app.put('/tasks/:id', async (req, res) => {
       return res.status(400).json({ erro: 'Status inválido.' });
     }
 
+    const descricaoAtual =
+      descricao === undefined ? tarefaExistente.rows[0].descricao ?? '' : descricao;
+    const descricaoLimpa = descricaoAtual?.trim() ?? '';
+    if (descricao !== undefined && descricaoLimpa.length < MIN_DESCRICAO) {
+      return res
+        .status(400)
+        .json({ erro: `A descrição deve ter pelo menos ${MIN_DESCRICAO} caracteres.` });
+    }
+
     const { rows } = await pool.query(
       `UPDATE tasks
        SET titulo = $1,
@@ -219,8 +250,8 @@ app.put('/tasks/:id', async (req, res) => {
        WHERE id = $5
        RETURNING *`,
       [
-        titulo.trim(),
-        descricao,
+        tituloLimpo,
+        descricaoLimpa,
         statusLimpo || tarefaExistente.rows[0].status,
         usuarioDestino,
         req.params.id,
@@ -263,11 +294,18 @@ app.get('/users', async (_, res) => {
 app.post('/users', async (req, res) => {
   try {
     const { nome, telefone } = req.body || {};
-    if (!nome?.trim() || !telefone?.trim()) {
+    const nomeLimpo = nome?.trim() ?? '';
+    const telefoneLimpo = telefone?.trim() ?? '';
+    if (!nomeLimpo || !telefoneLimpo) {
       return res.status(400).json({ erro: 'Informe nome e telefone do usuário.' });
     }
-    const telefoneLimpo = telefone.replace(/\D/g, '');
-    if (telefoneLimpo.length < 8) {
+    if (nomeLimpo.length < MIN_NOME) {
+      return res
+        .status(400)
+        .json({ erro: `O nome deve ter pelo menos ${MIN_NOME} caracteres.` });
+    }
+    const telefoneSomenteDigitos = telefoneLimpo.replace(/\D/g, '');
+    if (telefoneSomenteDigitos.length < 8) {
       return res.status(400).json({ erro: 'Telefone inválido.' });
     }
 
@@ -275,7 +313,7 @@ app.post('/users', async (req, res) => {
       `INSERT INTO users (nome, telefone)
        VALUES ($1, $2)
        RETURNING *`,
-      [nome.trim(), telefone.trim()]
+      [nomeLimpo, telefoneLimpo]
     );
     res.status(201).json(mapUserRow(rows[0]));
   } catch (error) {
